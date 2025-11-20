@@ -19,7 +19,8 @@ TranscribeStack(
     "TranscribeServiceStack",
     env=cdk.Environment(
         account=os.getenv("CDK_DEFAULT_ACCOUNT"),
-        region=os.getenv("CDK_DEFAULT_REGION", "us-east-1"),
+        # Default region set to eu-west-1 to match ffmpeg layer ARN region; override via CDK_DEFAULT_REGION env var if desired.
+        region=os.getenv("CDK_DEFAULT_REGION", "eu-west-1"),
     ),
 )
 app.synth()

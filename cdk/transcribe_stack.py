@@ -8,67 +8,100 @@ from aws_cdk import (
     aws_events_targets as targets,
 )
 
+DEFAULT_FFMPEG_LAYER_ARN = ""  # "arn:aws:lambda:eu-west-1:182544233882:layer:ffmpeg:1"  <- Created manually
+
+# The stack can either (1) attach an existing ffmpeg layer via FFMPEG_LAYER_ARN env var or default ARN
+# or (2) build a new layer with a static ffmpeg binary during bundling.
+
 class TranscribeStack(cdk.Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs):
         super().__init__(scope, construct_id, **kwargs)
 
-        # Use asset bundling to include dependencies from requirements.txt and only required sources
-        bundling = {
-            "image": _lambda.Runtime.PYTHON_3_11.bundling_image,
-            "command": [
-                "bash", "-c",
-                "pip install -r requirements.txt -t /asset-output "
-                "&& cp -r transcriber /asset-output/transcriber "
-                "&& if [ -f main.py ]; then cp main.py /asset-output/; fi "
-                "&& if [ -f config.json ]; then cp config.json /asset-output/; fi "
-                "&& if [ -f sa.json ]; then cp sa.json /asset-output/; fi"
-            ],
+        project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        python_runtime = _lambda.Runtime.PYTHON_3_11
+
+        external_ffmpeg_layer_arn = os.getenv("FFMPEG_LAYER_ARN") or DEFAULT_FFMPEG_LAYER_ARN
+        ffmpeg_layer: _lambda.ILayerVersion
+        if external_ffmpeg_layer_arn:
+            ffmpeg_layer = _lambda.LayerVersion.from_layer_version_arn(
+                self,
+                "ExternalFfmpegLayer",
+                layer_version_arn=external_ffmpeg_layer_arn,
+            )
+        else:
+            ffmpeg_download_cmd = (
+                "mkdir -p /asset-output/bin "
+                "&& curl -L https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz "
+                "-o /tmp/ffmpeg.tar.xz "
+                "&& tar -xJf /tmp/ffmpeg.tar.xz -C /tmp "
+                "&& cp /tmp/ffmpeg-*-amd64-static/ffmpeg /asset-output/bin/ffmpeg "
+                "&& chmod +x /asset-output/bin/ffmpeg"
+            )
+            ffmpeg_layer_bundling = {
+                "image": python_runtime.bundling_image,
+                "user": "root",
+                "command": ["bash", "-c", ffmpeg_download_cmd],
+            }
+            ffmpeg_layer = _lambda.LayerVersion(
+                self,
+                "FfmpegLayer",
+                code=_lambda.Code.from_asset(project_root, bundling=ffmpeg_layer_bundling),
+                compatible_runtimes=[python_runtime],
+                description="Static ffmpeg binary layer (downloaded during synth)",
+            )
+
+        app_bundling_cmd = (
+            "pip install -r requirements.txt -t /asset-output "
+            "&& cp -r transcriber /asset-output/transcriber "
+            "&& if [ -f main.py ]; then cp main.py /asset-output/; fi "
+            "&& if [ -f config.json ]; then cp config.json /asset-output/; fi "
+            "&& if [ -f sa.json ]; then cp sa.json /asset-output/; fi"
+        )
+        app_bundling = {
+            "image": python_runtime.bundling_image,
+            "user": "root",
+            "command": ["bash", "-c", app_bundling_cmd],
         }
 
         env_vars = {
-                "SERVICE_ACCOUNT_FILE": os.getenv("SERVICE_ACCOUNT_FILE", "sa.json"),
-                "DRIVE_FOLDER_ID": os.getenv("DRIVE_FOLDER_ID", "CHANGE_ME"),
-                "EMAIL_TO": os.getenv("EMAIL_TO", "CHANGE_ME"),
-                "GMAIL_SENDER_EMAIL": os.getenv("GMAIL_SENDER_EMAIL", "CHANGE_ME"),
-                "GMAIL_APP_PASSWORD": os.getenv("GMAIL_APP_PASSWORD", "CHANGE_ME"),
-                "RUNPOD_API_KEY": os.getenv("RUNPOD_API_KEY", "CHANGE_ME"),
-                "RUNPOD_ENDPOINT_ID": os.getenv("RUNPOD_ENDPOINT_ID", "CHANGE_ME"),
-                "CONFIG_PATH": os.getenv("CONFIG_PATH", "config.json"),
-                "MAX_SEGMENT_CONCURRENCY": os.getenv("MAX_SEGMENT_CONCURRENCY", "2"),
-                "SEG_SECONDS": os.getenv("SEG_SECONDS", str(10*60)),
-                "TIME_WINDOW_ENABLED": os.getenv("TIME_WINDOW_ENABLED", "1"),
-                "SCHEDULE_START_HOUR": os.getenv("SCHEDULE_START_HOUR", "8"),
-                "SCHEDULE_END_HOUR": os.getenv("SCHEDULE_END_HOUR", "22"),
-                "SCHEDULE_DAYS": os.getenv("SCHEDULE_DAYS", "SUN-THU"),
-                "SCHEDULE_TIMEZONE": os.getenv("SCHEDULE_TIMEZONE", "UTC"),
-                # Operational toggles
-                "SKIP_DRIVE": os.getenv("SKIP_DRIVE", "0"),
-                "BYPASS_SPLIT": os.getenv("BYPASS_SPLIT", "0"),
+            "SERVICE_ACCOUNT_FILE": os.getenv("SERVICE_ACCOUNT_FILE", "sa.json"),
+            "DRIVE_FOLDER_ID": os.getenv("DRIVE_FOLDER_ID", "CHANGE_ME"),
+            "EMAIL_TO": os.getenv("EMAIL_TO", "CHANGE_ME"),
+            "GMAIL_SENDER_EMAIL": os.getenv("GMAIL_SENDER_EMAIL", "CHANGE_ME"),
+            "GMAIL_APP_PASSWORD": os.getenv("GMAIL_APP_PASSWORD", "CHANGE_ME"),
+            "RUNPOD_API_KEY": os.getenv("RUNPOD_API_KEY", "CHANGE_ME"),
+            "RUNPOD_ENDPOINT_ID": os.getenv("RUNPOD_ENDPOINT_ID", "CHANGE_ME"),
+            "CONFIG_PATH": os.getenv("CONFIG_PATH", "config.json"),
+            "MAX_SEGMENT_CONCURRENCY": os.getenv("MAX_SEGMENT_CONCURRENCY", "2"),
+            "SEG_SECONDS": os.getenv("SEG_SECONDS", str(10 * 60)),
+            "TIME_WINDOW_ENABLED": os.getenv("TIME_WINDOW_ENABLED", "1"),
+            "SCHEDULE_START_HOUR": os.getenv("SCHEDULE_START_HOUR", "8"),
+            "SCHEDULE_END_HOUR": os.getenv("SCHEDULE_END_HOUR", "22"),
+            "SCHEDULE_DAYS": os.getenv("SCHEDULE_DAYS", "SUN-SAT"),  # full week
+            "SCHEDULE_TIMEZONE": os.getenv("SCHEDULE_TIMEZONE", "UTC"),
+            "SKIP_DRIVE": os.getenv("SKIP_DRIVE", "0"),
+            "BYPASS_SPLIT": os.getenv("BYPASS_SPLIT", "0"),
+            "FFMPEG_PATH": os.getenv("FFMPEG_PATH", "/opt/bin/ffmpeg"),
+            # Fun personal message feature default enabled (1=true)
+            "ADD_RANDOM_PERSONAL_MESSAGE": os.getenv("ADD_RANDOM_PERSONAL_MESSAGE", "1"),
         }
 
         lambda_fn = _lambda.Function(
             self,
             "DriveTranscriberLambda",
-            runtime=_lambda.Runtime.PYTHON_3_11,
+            runtime=python_runtime,
             handler="transcriber.lambda_handler.lambda_handler",
-            code=_lambda.Code.from_asset("..", bundling=bundling),  # bundle root project
+            code=_lambda.Code.from_asset(project_root, bundling=app_bundling),
             timeout=Duration.minutes(15),
             memory_size=1024,
             environment=env_vars,
+            layers=[ffmpeg_layer],
         )
 
-        # Optional: attach a prebuilt ffmpeg layer (set FFMPEG_LAYER_ARN) and set runtime path
-        ffmpeg_layer_arn = os.getenv("FFMPEG_LAYER_ARN")
-        if ffmpeg_layer_arn:
-            layer = _lambda.LayerVersion.from_layer_version_arn(self, "FfmpegLayer", layer_version_arn=ffmpeg_layer_arn)
-            lambda_fn.add_layers(layer)
-            lambda_fn.add_environment("FFMPEG_PATH", os.getenv("FFMPEG_PATH", "/opt/bin/ffmpeg"))
-
-        # EventBridge Rule: every 2 hours 08-22 UTC Sunday-Thursday
         schedule_expression = events.Schedule.cron(
             minute="0",
             hour="8,10,12,14,16,18,20,22",
-            week_day="SUN-THU",
+            week_day="*",  # every day
         )
 
         events.Rule(
@@ -77,5 +110,5 @@ class TranscribeStack(cdk.Stack):
             schedule=schedule_expression,
             targets=[targets.LambdaFunction(lambda_fn)],
             enabled=True,
-            description="Invoke transcription Lambda every 2 hours (08-22) Sun-Thu",
+            description="Invoke transcription Lambda every 2 hours (08-22) daily",
         )

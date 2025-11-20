@@ -12,6 +12,7 @@ from .drive import drive_service, list_m4a_files, download_file, get_or_create_p
 from .audio import convert_m4a_to_mp3, split_mp3
 from .model import load_model, transcribe_file
 from .emailer import send_transcription_email
+from .utils import sanitize_filename, generate_positive_personal_message  # updated import
 
 import aiohttp
 
@@ -126,7 +127,8 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
         balance_str = str(balance_val)
         spend_hr = str(spend_hr_val)
         limit_str = str(limit_val)
-        base_name = os.path.splitext(name)[0]
+        base_name_raw = os.path.splitext(name)[0]
+        base_name = sanitize_filename(base_name_raw)
         transcription_filename = f"{base_name}_transcription.txt"
         transcription_path = os.path.join(work_dir, transcription_filename)
         try:
@@ -135,13 +137,22 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
         except Exception as e:
             print(f"Failed to write transcription file {transcription_filename}: {e}")
         email_subject = f"Transcription: {base_name} (Balance: {balance_str})"
-        email_body = (
+        # Compose optional personal message
+        personal_prefix = ""
+        if cfg.add_random_personal_message:
+            try:
+                personal_prefix = generate_positive_personal_message(cfg.email_to) + "\n\n"
+            except Exception as e:
+                print(f"Failed to generate personal message: {e}")
+                personal_prefix = ""
+        email_body_main = (
             f"Transcription for file {name} (segments: {len(segments)})\n"
             f"Timestamp folder: {ts_dir_name}\n"
             f"RunPod Balance: {balance_str} | Spend/hr: {spend_hr} | Limit: {limit_str}\n\n"
             f"{full_text[:5000]}\n\n"
             f"--\nRemaining RunPod balance after this transcription: {balance_str}"
         )
+        email_body = personal_prefix + email_body_main
         email_sent = send_transcription_email(
             cfg.gmail_app_password,
             cfg.gmail_sender_email,
@@ -160,7 +171,13 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
             os.rmdir(work_dir)
         except Exception:
             pass
-        summaries.append({"id": fid, "name": name, "segments": len(segments), "email_sent": email_sent, "balance": balance_str})
+        summaries.append({
+            "id": fid,
+            "name": name,
+            "segments": len(segments),
+            "email_sent": email_sent,
+            "balance": balance_str,
+        })
     return {"processed": summaries, "total_files": len(summaries)}
 
 
@@ -178,4 +195,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

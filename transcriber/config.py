@@ -36,8 +36,9 @@ class Config:
     time_window_enabled: bool
     schedule_start_hour: int
     schedule_end_hour: int
-    schedule_days: str  # e.g. SUN-THU
+    schedule_days: str  # e.g. SUN-SAT
     timezone: str       # IANA timezone name
+    add_random_personal_message: bool  # new flag controlling fun header in email
     languages: Dict[str, Dict[str, Any]]
 
     @property
@@ -79,6 +80,16 @@ class Config:
         return True
 
 
+def _parse_bool_env(key: str, default_true: bool = False) -> bool:
+    val = os.environ.get(key)
+    if val is None:
+        return default_true
+    val_norm = val.strip().lower()
+    if val_norm in {"0", "false", "no", "off"}:
+        return False
+    return True
+
+
 def load_config(path: Optional[str] = None) -> Config:
     cfg_path = path or DEFAULT_CONFIG_PATH
     languages: Dict[str, Dict[str, Any]] = {}
@@ -105,7 +116,8 @@ def load_config(path: Optional[str] = None) -> Config:
         time_window_enabled=os.environ.get("TIME_WINDOW_ENABLED", "1") == "1",
         schedule_start_hour=int(os.environ.get("SCHEDULE_START_HOUR", "8")),
         schedule_end_hour=int(os.environ.get("SCHEDULE_END_HOUR", "22")),
-        schedule_days=os.environ.get("SCHEDULE_DAYS", "SUN-THU"),
+        schedule_days=os.environ.get("SCHEDULE_DAYS", "SUN-SAT"),
         timezone=os.environ.get("SCHEDULE_TIMEZONE", "UTC"),
+        add_random_personal_message=_parse_bool_env("ADD_RANDOM_PERSONAL_MESSAGE", default_true=True),
         languages=languages,
     )
