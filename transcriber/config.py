@@ -40,6 +40,8 @@ class Config:
     timezone: str       # IANA timezone name
     add_random_personal_message: bool  # new flag controlling fun header in email
     languages: Dict[str, Dict[str, Any]]
+    max_segment_retries: int  # how many retries after first attempt (total attempts = 1 + retries)
+    balance_alert_value: float  # threshold below which we mark LOW BALANCE in subject
 
     @property
     def within_schedule_window(self) -> bool:
@@ -120,4 +122,6 @@ def load_config(path: Optional[str] = None) -> Config:
         timezone=os.environ.get("SCHEDULE_TIMEZONE", "UTC"),
         add_random_personal_message=_parse_bool_env("ADD_RANDOM_PERSONAL_MESSAGE", default_true=True),
         languages=languages,
+        max_segment_retries=int(os.environ.get("MAX_SEGMENT_RETRIES", "2")),
+        balance_alert_value=float(os.environ.get("BALANCE_ALERT_VALUE", "2")),
     )

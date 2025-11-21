@@ -41,11 +41,10 @@ def generate_positive_personal_message(recipient: str | None = None) -> str:
     """Generate a short upbeat personal message by composing multiple random parts.
 
     The message is built from: greeting + energy phrase + 2-3 shuffled boosts + closing.
-    This creates large variety vs picking from a single list.
+    Ensures personalization appears when a recipient is provided.
     """
     now = datetime.utcnow()
     hour = now.hour
-    # Time-based greeting variants
     if hour < 6:
         tod = "early hours"
     elif hour < 12:
@@ -57,13 +56,15 @@ def generate_positive_personal_message(recipient: str | None = None) -> str:
     greetings = [
         f"Hey", f"Hi", f"Hello", f"Hey there", f"Greetings"
     ]
+    nick = None
     if recipient:
-        # Use part before @ for personalization if safe
-        nick = recipient.split('@')[0][:25]
-        nick = ''.join(ch for ch in nick if ch.isalnum() or ch in ('_', '-', '.'))
-        if nick:
-            greetings.append(f"Hi {nick}")
-    greeting = random.choice(greetings) + f" — hope your {tod} is going well!"
+        nick_raw = recipient.split('@')[0][:25]
+        nick = ''.join(ch for ch in nick_raw if ch.isalnum() or ch in ('_', '-', '.'))
+    if nick:
+        # Guarantee at least one personalized greeting by using it directly.
+        greeting = f"Hi {nick} — hope your {tod} is going well!"
+    else:
+        greeting = random.choice(greetings) + f" — hope your {tod} is going well!"
 
     energy_phrases = [
         "May your focus feel light and steady today.",

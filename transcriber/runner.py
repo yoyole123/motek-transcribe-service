@@ -115,6 +115,7 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
                 max_concurrency=cfg.max_segment_concurrency,
                 bypass_split=cfg.bypass_split,
                 splitter_fn=split_mp3,
+                max_segment_retries=cfg.max_segment_retries,
             )
         except Exception as e:
             print(f"Transcription failed {name}: {e}")
@@ -136,7 +137,15 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
                 tf.write(full_text)
         except Exception as e:
             print(f"Failed to write transcription file {transcription_filename}: {e}")
-        email_subject = f"Transcription: {base_name} (Balance: {balance_str})"
+        email_subject_balance_part = str(balance_str)
+        low_balance_suffix = ""
+        try:
+            bal_f = float(balance_str)
+            if bal_f < cfg.balance_alert_value:
+                low_balance_suffix = " LOW BALANCE!"
+        except Exception:
+            pass
+        email_subject = f"Transcription: {base_name} (Balance: {email_subject_balance_part}{low_balance_suffix})"
         # Compose optional personal message
         personal_prefix = ""
         if cfg.add_random_personal_message:

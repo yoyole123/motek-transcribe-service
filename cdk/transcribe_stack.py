@@ -72,7 +72,7 @@ class TranscribeStack(cdk.Stack):
             "RUNPOD_API_KEY": os.getenv("RUNPOD_API_KEY", "CHANGE_ME"),
             "RUNPOD_ENDPOINT_ID": os.getenv("RUNPOD_ENDPOINT_ID", "CHANGE_ME"),
             "CONFIG_PATH": os.getenv("CONFIG_PATH", "config.json"),
-            "MAX_SEGMENT_CONCURRENCY": os.getenv("MAX_SEGMENT_CONCURRENCY", "2"),
+            "MAX_SEGMENT_CONCURRENCY": os.getenv("MAX_SEGMENT_CONCURRENCY", "3"),
             "SEG_SECONDS": os.getenv("SEG_SECONDS", str(10 * 60)),
             "TIME_WINDOW_ENABLED": os.getenv("TIME_WINDOW_ENABLED", "1"),
             "SCHEDULE_START_HOUR": os.getenv("SCHEDULE_START_HOUR", "8"),
@@ -82,6 +82,8 @@ class TranscribeStack(cdk.Stack):
             "SKIP_DRIVE": os.getenv("SKIP_DRIVE", "0"),
             "BYPASS_SPLIT": os.getenv("BYPASS_SPLIT", "0"),
             "FFMPEG_PATH": os.getenv("FFMPEG_PATH", "/opt/bin/ffmpeg"),
+            "MAX_SEGMENT_RETRIES": os.getenv("MAX_SEGMENT_RETRIES", "1"),
+            "BALANCE_ALERT_VALUE": os.getenv("BALANCE_ALERT_VALUE", "2"),
             # Fun personal message feature default enabled (1=true)
             "ADD_RANDOM_PERSONAL_MESSAGE": os.getenv("ADD_RANDOM_PERSONAL_MESSAGE", "1"),
         }
