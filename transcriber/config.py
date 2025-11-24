@@ -11,16 +11,50 @@ from dataclasses import dataclass
 from typing import Any, Dict, Optional
 import datetime as _dt
 
+from .constants import (
+    ENV_SERVICE_ACCOUNT_FILE,
+    ENV_DRIVE_FOLDER_ID,
+    ENV_EMAIL_TO,
+    ENV_GMAIL_SENDER_EMAIL,
+    ENV_GMAIL_APP_PASSWORD,
+    ENV_RUNPOD_API_KEY,
+    ENV_RUNPOD_ENDPOINT_ID,
+    ENV_CONFIG_PATH,
+    ENV_MAX_SEGMENT_CONCURRENCY,
+    ENV_SEG_SECONDS,
+    ENV_SKIP_DRIVE,
+    ENV_BYPASS_SPLIT,
+    ENV_TIME_WINDOW_ENABLED,
+    ENV_SCHEDULE_START_HOUR,
+    ENV_SCHEDULE_END_HOUR,
+    ENV_SCHEDULE_DAYS,
+    ENV_SCHEDULE_TIMEZONE,
+    ENV_MAX_SEGMENT_RETRIES,
+    ENV_BALANCE_ALERT_VALUE,
+    ENV_MAX_PAYLOAD_SIZE,
+    ENV_MAX_SPLIT_DEPTH,
+    ENV_MAX_SEGMENT_SIZE,
+    DEFAULT_CONFIG_PATH_REL,
+    ENV_ADD_RANDOM_PERSONAL_MESSAGE,
+)
+
 try:
+    # dotenv is optional in Lambda; locally it's helpful
     from dotenv import load_dotenv
     load_dotenv()
 except Exception:
     pass  # dotenv optional in Lambda
 
-DEFAULT_CONFIG_PATH = os.environ.get("CONFIG_PATH", os.path.join(os.path.dirname(__file__), "..", "config.json"))
+# Default config path: env override or repo root config.json
+DEFAULT_CONFIG_PATH = os.environ.get(
+    ENV_CONFIG_PATH,
+    os.path.join(os.path.dirname(__file__), "..", DEFAULT_CONFIG_PATH_REL),
+)
+
 
 @dataclass
 class Config:
+    """Strongly-typed configuration values consumed by the pipeline."""
     service_account_file: Optional[str]
     drive_folder_id: Optional[str]
     email_to: Optional[str]
@@ -48,11 +82,17 @@ class Config:
 
     @property
     def within_schedule_window(self) -> bool:
+        """Return True if current local time is within configured schedule window.
+
+        - If time-window enforcement is disabled, always returns True.
+        - Day range specified via labels like SUN-SAT.
+        - Uses zoneinfo if available; falls back to UTC.
+        """
         if not self.time_window_enabled:
             return True
         now: _dt.datetime
         try:
-            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError  # Python 3.9+
             tz_key = self.timezone
             if tz_key.upper() in {"UTC", "ETC/UTC", "GMT", "Z"}:
                 tz_key = "UTC"
@@ -64,8 +104,8 @@ class Config:
                 now = _dt.datetime.now(_dt.UTC)
         except Exception:
             now = _dt.datetime.now(_dt.UTC)
-        label_for = {0:"MON",1:"TUE",2:"WED",3:"THU",4:"FRI",5:"SAT",6:"SUN"}
-        idx_for = {v:k for k,v in label_for.items()}
+        label_for = {0: "MON", 1: "TUE", 2: "WED", 3: "THU", 4: "FRI", 5: "SAT", 6: "SUN"}
+        idx_for = {v: k for k, v in label_for.items()}
         parts = self.schedule_days.split('-')
         if len(parts) == 1:
             start_label = end_label = parts[0]
@@ -86,6 +126,11 @@ class Config:
 
 
 def _parse_bool_env(key: str, default_true: bool = False) -> bool:
+    """Parse an environment variable into boolean with common falsy synonyms.
+
+    Accepts: 0, false, no, off -> False, anything else -> True when present.
+    When absent, returns default_true.
+    """
     val = os.environ.get(key)
     if val is None:
         return default_true
@@ -96,6 +141,11 @@ def _parse_bool_env(key: str, default_true: bool = False) -> bool:
 
 
 def load_config(path: Optional[str] = None) -> Config:
+    """Load configuration by merging environment variables and config.json.
+
+    The JSON file is used for language mapping and similar structured config,
+    while scalar toggles come from env vars for easy overrides.
+    """
     cfg_path = path or DEFAULT_CONFIG_PATH
     languages: Dict[str, Dict[str, Any]] = {}
     if os.path.exists(cfg_path):
@@ -106,28 +156,28 @@ def load_config(path: Optional[str] = None) -> Config:
         except Exception:
             languages = {}
     return Config(
-        service_account_file=os.environ.get("SERVICE_ACCOUNT_FILE"),
-        drive_folder_id=os.environ.get("DRIVE_FOLDER_ID"),
-        email_to=os.environ.get("EMAIL_TO"),
-        gmail_sender_email=os.environ.get("GMAIL_SENDER_EMAIL"),
-        gmail_app_password=os.environ.get("GMAIL_APP_PASSWORD"),
-        runpod_api_key=os.environ.get("RUNPOD_API_KEY"),
-        runpod_endpoint_id=os.environ.get("RUNPOD_ENDPOINT_ID"),
+        service_account_file=os.environ.get(ENV_SERVICE_ACCOUNT_FILE),
+        drive_folder_id=os.environ.get(ENV_DRIVE_FOLDER_ID),
+        email_to=os.environ.get(ENV_EMAIL_TO),
+        gmail_sender_email=os.environ.get(ENV_GMAIL_SENDER_EMAIL),
+        gmail_app_password=os.environ.get(ENV_GMAIL_APP_PASSWORD),
+        runpod_api_key=os.environ.get(ENV_RUNPOD_API_KEY),
+        runpod_endpoint_id=os.environ.get(ENV_RUNPOD_ENDPOINT_ID),
         config_path=cfg_path,
-        max_segment_concurrency=int(os.environ.get("MAX_SEGMENT_CONCURRENCY", "2")),
-        seg_seconds=int(os.environ.get("SEG_SECONDS", str(8*60))),
-        skip_drive=os.environ.get("SKIP_DRIVE") == "1",
-        bypass_split=os.environ.get("BYPASS_SPLIT") == "1",
-        time_window_enabled=os.environ.get("TIME_WINDOW_ENABLED", "1") == "1",
-        schedule_start_hour=int(os.environ.get("SCHEDULE_START_HOUR", "8")),
-        schedule_end_hour=int(os.environ.get("SCHEDULE_END_HOUR", "22")),
-        schedule_days=os.environ.get("SCHEDULE_DAYS", "SUN-SAT"),
-        timezone=os.environ.get("SCHEDULE_TIMEZONE", "UTC"),
-        add_random_personal_message=_parse_bool_env("ADD_RANDOM_PERSONAL_MESSAGE", default_true=True),
+        max_segment_concurrency=int(os.environ.get(ENV_MAX_SEGMENT_CONCURRENCY, "2")),
+        seg_seconds=int(os.environ.get(ENV_SEG_SECONDS, str(8 * 60))),
+        skip_drive=os.environ.get(ENV_SKIP_DRIVE) == "1",
+        bypass_split=os.environ.get(ENV_BYPASS_SPLIT) == "1",
+        time_window_enabled=os.environ.get(ENV_TIME_WINDOW_ENABLED, "1") == "1",
+        schedule_start_hour=int(os.environ.get(ENV_SCHEDULE_START_HOUR, "8")),
+        schedule_end_hour=int(os.environ.get(ENV_SCHEDULE_END_HOUR, "22")),
+        schedule_days=os.environ.get(ENV_SCHEDULE_DAYS, "SUN-SAT"),
+        timezone=os.environ.get(ENV_SCHEDULE_TIMEZONE, "UTC"),
+        add_random_personal_message=_parse_bool_env(ENV_ADD_RANDOM_PERSONAL_MESSAGE, default_true=True),
         languages=languages,
-        max_segment_retries=int(os.environ.get("MAX_SEGMENT_RETRIES", "2")),
-        balance_alert_value=float(os.environ.get("BALANCE_ALERT_VALUE", "2")),
-        max_payload_size=int(os.environ.get("MAX_PAYLOAD_SIZE", str(9*1024*1024))),
-        max_split_depth=int(os.environ.get("MAX_SPLIT_DEPTH", "3")),
-        max_segment_size=int(os.environ.get("MAX_SEGMENT_SIZE", str(8*1024*1024))),
+        max_segment_retries=int(os.environ.get(ENV_MAX_SEGMENT_RETRIES, "2")),
+        balance_alert_value=float(os.environ.get(ENV_BALANCE_ALERT_VALUE, "2")),
+        max_payload_size=int(os.environ.get(ENV_MAX_PAYLOAD_SIZE, str(9 * 1024 * 1024))),
+        max_split_depth=int(os.environ.get(ENV_MAX_SPLIT_DEPTH, "3")),
+        max_segment_size=int(os.environ.get(ENV_MAX_SEGMENT_SIZE, str(8 * 1024 * 1024))),
     )

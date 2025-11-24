@@ -1,16 +1,20 @@
 """Audio conversion and splitting helpers using ffmpeg."""
+from __future__ import annotations
 import os
 import subprocess
 import shutil
-import math
+from typing import Optional
 from . import logger
+from .constants import ENV_FFMPEG_PATH, DEFAULT_FFMPEG_PATH
 
-FFMPEG_BIN = os.environ.get("FFMPEG_PATH", "ffmpeg")
+FFMPEG_BIN: str = os.environ.get(ENV_FFMPEG_PATH, DEFAULT_FFMPEG_PATH)
 
-# New generic conversion
 
-def convert_to_mp3(input_path: str, output_path: str):
-    """Convert any supported audio file to MP3 (libmp3lame). If already MP3, copy or reuse."""
+def convert_to_mp3(input_path: str, output_path: str) -> None:
+    """Convert any supported audio file to MP3 (libmp3lame).
+
+    If the input is already an MP3, copy to the target path (if different).
+    """
     ext = os.path.splitext(input_path)[1].lower()
     if ext == ".mp3":
         # If output different path, just copy
@@ -25,13 +29,15 @@ def convert_to_mp3(input_path: str, output_path: str):
         FFMPEG_BIN, "-y", "-i", input_path, "-vn", "-acodec", "libmp3lame", "-q:a", "2", output_path
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
+
 # Backwards compatibility wrapper
 
-def convert_m4a_to_mp3(m4a_path, mp3_path):
+def convert_m4a_to_mp3(m4a_path: str, mp3_path: str) -> None:
     convert_to_mp3(m4a_path, mp3_path)
 
 
-def split_mp3(mp3_path, out_pattern, seg_seconds: int):
+def split_mp3(mp3_path: str, out_pattern: str, seg_seconds: int) -> None:
+    """Split an MP3 into fixed-length segments using stream copy (no re-encode)."""
     logger.info("Splitting %s into %ds segments -> %s", mp3_path, seg_seconds, out_pattern)
     subprocess.check_call([
         FFMPEG_BIN, "-y", "-i", mp3_path,
@@ -40,7 +46,7 @@ def split_mp3(mp3_path, out_pattern, seg_seconds: int):
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def _get_bitrate_bits(mp3_path: str) -> int | None:
+def _get_bitrate_bits(mp3_path: str) -> Optional[int]:
     """Return overall bitrate in bits/sec for an mp3 file using ffprobe, or None if unavailable."""
     try:
         out = subprocess.check_output([
@@ -53,16 +59,13 @@ def _get_bitrate_bits(mp3_path: str) -> int | None:
         return None
 
 
-def split_mp3_by_size(mp3_path: str, out_pattern: str, max_segment_size: int, fallback_seg_seconds: int):
-    """Split an MP3 into segments whose sizes aim to stay below max_segment_size.
+def split_mp3_by_size(mp3_path: str, out_pattern: str, max_segment_size: int, fallback_seg_seconds: int) -> None:
+    """Split an MP3 into segments sized under a target byte ceiling.
 
     Approach: derive approximate segment duration from bitrate.
-    - bitrate bits/sec -> bytes/sec = bitrate/8
-    - duration_target = floor((max_segment_size * SAFETY) / bytes_per_sec)
-    - Ensure a minimum duration (e.g. 30s) and not more than fallback_seg_seconds.
-    If bitrate unknown, fall back to provided seg_seconds.
+    If bitrate is unknown, fall back to provided seg_seconds.
 
-    If original file already <= max_segment_size -> copy as single seg000.mp3.
+    If the original file is already <= max_segment_size, emit a single seg000.mp3.
     """
     if not os.path.exists(mp3_path):
         raise FileNotFoundError(mp3_path)
@@ -83,7 +86,12 @@ def split_mp3_by_size(mp3_path: str, out_pattern: str, max_segment_size: int, fa
     else:
         duration_target = fallback_seg_seconds
         logger.debug("Falling back to seg_seconds=%s for %s", fallback_seg_seconds, mp3_path)
-    logger.info("Splitting %s by size target %d bytes -> estimated duration %ds", mp3_path, max_segment_size, duration_target)
+    logger.info(
+        "Splitting %s by size target %d bytes -> estimated duration %ds",
+        mp3_path,
+        max_segment_size,
+        duration_target,
+    )
     subprocess.check_call([
         FFMPEG_BIN, "-y", "-i", mp3_path,
         "-f", "segment", "-segment_time", str(duration_target),

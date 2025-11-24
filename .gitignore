@@ -1,6 +1,35 @@
-.env
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+.python-version
+
+# Environments
+.venv/
+venv/
+env/
+
+# IDE / OS
+.vscode/
 .idea/
-keys
+.DS_Store
+Thumbs.db
+
+# Project secrets / local config
+.env
 sa.json
-.git
-cdk/cdk.out
+keys/
+
+# Test / build caches
+.pytest_cache/
+.cache/
+.dist/
+dist/
+build/
+
+# CDK outputs
+cdk.out/
+
