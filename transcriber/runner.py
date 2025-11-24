@@ -8,13 +8,20 @@ from datetime import datetime, timezone
 from typing import Dict, Any
 
 from .config import load_config
-from .drive import drive_service, list_audio_files, download_file, get_or_create_processed_folder, move_file_to_folder  # updated import
-from .audio import convert_to_mp3, split_mp3, split_mp3_by_size  # add size-based splitter
+from .drive import (
+    drive_service,
+    list_audio_files,
+    download_file,
+    get_or_create_processed_folder,
+    move_file_to_folder,
+)
+from .audio import convert_to_mp3, split_mp3_by_size  # size-based splitter
 from .model import load_model, transcribe_file
 from .emailer import send_transcription_email
 from .utils import sanitize_filename, generate_positive_personal_message  # updated import
 
 import aiohttp
+from . import logger
 
 TEMP_DIR = os.path.join(tempfile.gettempdir(), "drive_work")
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -56,7 +63,7 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
     if not cfg.within_schedule_window:
         return {"status": "outside schedule window"}
     if cfg.skip_drive:
-        print("SKIP_DRIVE=1 set; treating as no files.")
+        logger.info("SKIP_DRIVE=1 set; treating as no files.")
         return {"status": "no audio files found", "total_files": 0}
     if not cfg.drive_folder_id:
         return {"error": "DRIVE_FOLDER_ID env var is required"}
@@ -70,7 +77,7 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
     except Exception as e:
         return {"error": "drive_list_failed", "detail": str(e)}
     if not files:
-        print("No audio files found.")
+        logger.info("No audio files found.")
         return {"status": "no audio files found", "total_files": 0}
     processed_folder_id = get_or_create_processed_folder(drive_svc, cfg.drive_folder_id, cfg.skip_drive)
     if not processed_folder_id:
@@ -98,15 +105,20 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
         try:
             download_file(drive_svc, fid, audio_input_path, cfg.skip_drive)
         except Exception as e:
-            print(f"Download failed {fid}: {e}")
+            logger.error("Download failed %s: %s", fid, e)
             summaries.append({"id": fid, "name": name, "error": f"download_failed: {e}"})
             continue
         try:
             convert_to_mp3(audio_input_path, mp3_full)
         except Exception as e:
-            print(f"Conversion failed {name}: {e}")
+            logger.error("Conversion failed %s: %s", name, e)
             summaries.append({"id": fid, "name": name, "error": f"conversion_failed: {e}"})
             continue
+        # Build a small splitter callable honoring configured max_segment_size.
+        # Use a wrapper to ensure the positional argument order matches
+        # split_mp3_by_size(mp3_path, out_pattern, max_segment_size, fallback_seg_seconds)
+        def splitter_callable(src, pattern, seg_secs, max_segment_size=cfg.max_segment_size):
+            return split_mp3_by_size(src, pattern, max_segment_size, seg_secs)
         try:
             full_text, segments = await transcribe_file(
                 model,
@@ -115,13 +127,13 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
                 seg_seconds=cfg.seg_seconds,
                 max_concurrency=cfg.max_segment_concurrency,
                 bypass_split=cfg.bypass_split,
-                splitter_fn=lambda src, pattern, seg_secs: split_mp3_by_size(src, pattern, cfg.max_segment_size, seg_secs),
+                splitter_fn=splitter_callable,
                 max_segment_retries=cfg.max_segment_retries,
                 max_payload_size=cfg.max_payload_size,
                 max_split_depth=cfg.max_split_depth,
             )
         except Exception as e:
-            print(f"Transcription failed {name}: {e}")
+            logger.error("Transcription failed %s: %s", name, e)
             summaries.append({"id": fid, "name": name, "error": f"transcription_failed: {e}"})
             continue
         balance_info = await fetch_runpod_balance(cfg.runpod_api_key) or initial_balance
@@ -139,7 +151,7 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
             with open(transcription_path, 'w', encoding='utf-8') as tf:
                 tf.write(full_text)
         except Exception as e:
-            print(f"Failed to write transcription file {transcription_filename}: {e}")
+            logger.error("Failed to write transcription file %s: %s", transcription_filename, e)
         email_subject_balance_part = str(balance_str)
         low_balance_suffix = ""
         try:
@@ -155,7 +167,7 @@ async def process_drive_files(cfg) -> Dict[str, Any]:
             try:
                 personal_prefix = generate_positive_personal_message(cfg.email_to) + "\n\n"
             except Exception as e:
-                print(f"Failed to generate personal message: {e}")
+                logger.error("Failed to generate personal message: %s", e)
                 personal_prefix = ""
         email_body_main = (
             f"Transcription for file {name} (segments: {len(segments)})\n"
@@ -199,10 +211,9 @@ async def run() -> Dict[str, Any]:
 
 
 def main():
-    print("Starting scheduled Drive transcription run (local CLI)...")
+    logger.info("Starting scheduled Drive transcription run (local CLI)...")
     result = asyncio.run(run())
-    print("Run result:")
-    print(json.dumps(result, indent=2, ensure_ascii=False))
+    logger.info("Run result:\n%s", json.dumps(result, indent=2, ensure_ascii=False))
     return result
 
 if __name__ == "__main__":

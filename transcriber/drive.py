@@ -8,6 +8,7 @@ from google.auth.exceptions import GoogleAuthError
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from googleapiclient.errors import HttpError
+from . import logger
 
 PROCESSED_FOLDER_ID_CACHE = None
 
@@ -41,7 +42,7 @@ def drive_service(skip_drive: bool, service_account_file: str | None):
     sa_path = _resolve_service_account_path(service_account_file)
     if sa_path:
         creds = service_account.Credentials.from_service_account_file(sa_path, scopes=scopes)
-        print(f"Using service account for Drive: {sa_path}")
+        logger.info("Using service account for Drive: %s", sa_path)
         return build("drive", "v3", credentials=creds, cache_discovery=False)
     try:
         creds, _ = default(scopes=scopes)
@@ -117,16 +118,16 @@ def get_or_create_processed_folder(service, parent_folder_id: str, skip_drive: b
             PROCESSED_FOLDER_ID_CACHE = folder_id
             return folder_id
     except HttpError as e:
-        print(f"Error searching for '{folder_name}' folder: {e}. Will attempt to create it.")
+        logger.warning("Error searching for '%s' folder: %s. Will attempt to create it.", folder_name, e)
     try:
         folder_metadata = {'name': folder_name, 'mimeType': 'application/vnd.google-apps.folder', 'parents': [parent_folder_id]}
         folder = service.files().create(body=folder_metadata, fields='id').execute()
         folder_id = folder.get('id')
         PROCESSED_FOLDER_ID_CACHE = folder_id
-        print(f"Created 'processed' folder with ID: {folder_id}")
+        logger.info("Created 'processed' folder with ID: %s", folder_id)
         return folder_id
     except HttpError as e:
-        print(f"Fatal: Could not create 'processed' folder: {e}")
+        logger.error("Fatal: Could not create 'processed' folder: %s", e)
         return None
 
 
@@ -141,4 +142,4 @@ def move_file_to_folder(service, file_id, new_parent_id, old_parent_id, skip_dri
             fields='id, parents'
         ).execute()
     except HttpError as e:
-        print(f"Warning: Failed to move file {file_id} to folder {new_parent_id}: {e}")
+        logger.warning("Warning: Failed to move file %s to folder %s: %s", file_id, new_parent_id, e)
