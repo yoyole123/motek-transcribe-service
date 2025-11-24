@@ -2,3 +2,5 @@
 .idea/
 keys
 sa.json
+.git
+cdk/cdk.out
